@@ -1,0 +1,140 @@
+<!-- templates/index.html -->
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <title>Admin Key Manager</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family: Arial, Helvetica, sans-serif; margin:20px;}
+    h1{color:#1a73e8}
+    .card{border:1px solid #ddd;padding:12px;margin-bottom:12px;border-radius:6px;}
+    input, button, select {padding:8px;margin:4px;}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #eee;padding:8px;text-align:left;font-size:13px}
+    .small{font-size:12px;color:#666}
+    .btn{cursor:pointer}
+  </style>
+</head>
+<body>
+  <h1>Quản lý Key - Admin</h1>
+
+  <div class="card">
+    <h3>Key hiện tại</h3>
+    <div id="currentKey" class="small">Đang tải...</div>
+    <div style="margin-top:8px;">
+      <input id="newKeyInput" placeholder="FreeKey-XXXXXX hoặc để trống để tự tạo"/>
+      <button id="btnCreate">Tạo / Cập nhật Key</button>
+      <button id="btnInvalidate">Huỷ Key</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Logs nhận được</h3>
+    <div style="margin-bottom:8px;">
+      <input id="filterInput" placeholder="Lọc IP hoặc key..." />
+      <button id="btnFilter">Lọc</button>
+      <button id="btnRefresh">Làm mới</button>
+    </div>
+    <div style="max-height:350px; overflow:auto;">
+      <table id="logsTable">
+        <thead><tr><th>Thời gian</th><th>IP</th><th>Key</th><th>Extra</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Blacklist IP</h3>
+    <div>
+      <input id="ipBlacklistInput" placeholder="Nhập IP để chặn"/>
+      <button id="btnAddBlock">Chặn</button>
+      <button id="btnUnblock">Bỏ chặn</button>
+    </div>
+    <div id="blacklistArea" class="small" style="margin-top:8px"></div>
+  </div>
+
+<script>
+async function api(path, opts){
+  const res = await fetch(path, opts);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+async function loadKey(){
+  try{
+    const data = await api('/api/key');
+    if (Object.keys(data).length === 0){
+      document.getElementById('currentKey').innerText = 'Chưa có key cấu hình.';
+    } else {
+      document.getElementById('currentKey').innerHTML = 
+        `<b>${data.key}</b> — Expires: ${data.expires} — Valid: ${data.valid ? 'Yes' : 'No'}<div class="small">Ghi chú: ${data.note||''}</div>`;
+    }
+  }catch(e){ document.getElementById('currentKey').innerText = 'Lỗi tải key: ' + e.message; }
+}
+
+async function createKey(){
+  let v = document.getElementById('newKeyInput').value.trim();
+  if(!v){
+    // auto generate server-side: create format FreeKey-<RAND6>
+    v = 'FreeKey-' + (Math.random().toString(36).substr(2,6)).toUpperCase();
+  }
+  const payload = { key: v, expires: new Date().toISOString().slice(0,10).replace(/-/g,'') , note: 'Tạo thủ công' };
+  await api('/api/key', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  await loadKey();
+  loadLogs();
+}
+
+async function invalidateKey(){
+  await api('/api/key', { method: 'DELETE' });
+  await loadKey();
+}
+
+async function loadLogs(q=''){
+  try{
+    const url = '/api/logs' + (q ? '?q='+encodeURIComponent(q) : '');
+    const logs = await api(url);
+    const tbody = document.querySelector('#logsTable tbody');
+    tbody.innerHTML = '';
+    for(const l of logs){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${l.received_at}</td><td>${l.ip}</td><td>${l.key||''}</td><td><pre style="white-space:pre-wrap">${JSON.stringify(l.extra)}</pre></td>`;
+      tbody.appendChild(tr);
+    }
+  }catch(e){ console.error(e); alert('Lỗi tải logs: '+e.message); }
+}
+
+async function loadBlacklist(){
+  try{
+    const bl = await api('/api/blacklist');
+    document.getElementById('blacklistArea').innerText = bl.length ? bl.join('\n') : 'Chưa có IP nào bị chặn.';
+  }catch(e){ document.getElementById('blacklistArea').innerText = 'Lỗi tải blacklist'; }
+}
+
+async function addBlacklist(){
+  const ip = document.getElementById('ipBlacklistInput').value.trim();
+  if(!ip) return alert('Nhập IP');
+  await api('/api/blacklist', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ip})});
+  loadBlacklist();
+}
+
+async function removeBlacklist(){
+  const ip = document.getElementById('ipBlacklistInput').value.trim();
+  if(!ip) return alert('Nhập IP');
+  await api('/api/blacklist', { method: 'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ip})});
+  loadBlacklist();
+}
+
+document.getElementById('btnCreate').addEventListener('click', createKey);
+document.getElementById('btnInvalidate').addEventListener('click', invalidateKey);
+document.getElementById('btnRefresh').addEventListener('click', () => loadLogs());
+document.getElementById('btnFilter').addEventListener('click', () => loadLogs(document.getElementById('filterInput').value.trim()));
+document.getElementById('btnAddBlock').addEventListener('click', addBlacklist);
+document.getElementById('btnUnblock').addEventListener('click', removeBlacklist);
+
+loadKey();
+loadLogs();
+loadBlacklist();
+</script>
+</body>
+</html>
